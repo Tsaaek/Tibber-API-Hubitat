@@ -1,0 +1,246 @@
+/*
+Tibber quater prices
+
+The driver fetches price info from Tibber API once an hour (refresh command), calculates day average price, low/high price and stores the data.
+Every quater it updates the current price from the stored data and sets the child devices according to the current price.
+
+Low/high prices.
+The spread between the highest and lowest price of the day is calculated and is then multiplied with the factor set in the settings. The result is added to the lowest price and is used as a threshold for low prices. (For high prices it is subtracted from the highest price.)
+Example:
+Factor is set to 10%
+Highest price is 120
+Lowest price is 20
+The spread is 120-20 = 100 * 10% = 10
+
+Low price threshold = 20 + 10 = 30. Every hour with a price equal to or lower to 30 will be concidered as low price-hour. Stored in attribute lowPrice.
+High price threshold = 120 - 10 = 110. Every hour with a price equal to or higher than 110 will be concidered as high price-hour. Stored in attribute highPrice.
+
+The device has four child devices:
+- Tibber_lowPrice - turns on when price is equal to or lower than lowPrice.
+- Tibber_highPrice - turns on when price is equal to or higher than highPrice.
+- Tibber_belowAvg - turns on when price is lower than or equal to day average price. (todayAvg)
+- Tibber_aboveAvg - turns on when price is higher than day average price.
+
+ */
+import java.text.SimpleDateFormat
+import groovy.json.JsonOutput
+import groovy.json.JsonBuilder
+import groovy.time.TimeCategory
+
+
+metadata {
+    definition(name: "Tibber quater prices", namespace: "tsaaek", author: "Tommy Saaek", importUrl: "") {
+	capability "Sensor"
+        capability "Initialize"
+	capability "Polling"
+	capability "Refresh"
+	capability "Actuator"
+	
+	attribute "today", "String"
+	attribute "avgToday", "Number"
+	attribute "currentPrice", "NUMBER"
+    	attribute "lowPrice", "Number"
+	attribute "highPrice", "Number"
+	   
+    }
+}
+
+preferences {
+    section("Security") {
+        input "securityToken", "text", title: "Tibber API-token", required: true
+
+	input name: "logEnable", type: "bool", title: "Enable info logging", defaultValue: true
+	input "factor", "number", title:"Price factor for low/high prices in percent", defaultValue: 10
+	    
+    }
+
+}
+
+def clearStateVariables(){
+    device.deleteCurrentState('PriceListToday')
+    state.clear()
+}
+
+def logsOff() {
+    log.warn "debug logging disabled..."
+    device.updateSetting("logEnable", [value: "false", type: "bool"])
+}
+
+def updated() {
+	initialize()
+}
+
+def logInfo(msg){
+	if (logEnable) log.info msg	
+}
+
+
+def poll () {
+	def rawString =  device.currentValue('today')
+	def map = [:]
+
+
+	rawString
+    	.replaceAll(/[{}]/, '')
+    	.split(', ') 
+    	.each {
+        def (key, value) = it.split('=') 
+        map[key] = value.toInteger()      
+    	}
+	def time = addZero(new Date().getHours()) + ":" + addZero(new Date().getMinutes())				
+	def currentPrice = map.getAt(time)
+
+	logInfo("Polling")		
+	if(currentPrice)sendEvent(name: "currentPrice", value: currentPrice)
+	runIn(3,updateChildDevices)
+
+}
+def installed() {
+    log.info "installed() called"
+	
+    	updated()
+}
+
+def initialize() {
+	try {
+		log.info "Creating child devices"
+	addChildDevice("hubitat", "Virtual Switch", "${device.id}-lowPrice", [name : "Tibber_lowPrice"])
+	addChildDevice("hubitat", "Virtual Switch", "${device.id}-highPrice", [name : "Tibber_highPrice"])
+	addChildDevice("hubitat", "Virtual Switch", "${device.id}-belowAvg", [name : "Tibber_belowAvg"])
+	addChildDevice("hubitat", "Virtual Switch", "${device.id}-aboveAvg", [name : "Tibber_aboveAvg"])
+	    
+	}
+	            catch (Exception ex) {
+                  // Child devices are already created
+            }
+	log.info "Starting schedule"
+	
+	startSchedule()
+	
+}
+
+def startSchedule(){
+	unschedule()
+	schedule("00 00 * ? * *",poll, [overwrite: false])
+	schedule("00 15 * ? * *",poll, [overwrite: false]) 
+	schedule("00 30 * ? * *",poll, [overwrite: false])
+	schedule("00 45 * ? * *",poll, [overwrite: false]) 
+	schedule("00 57 * ? * *",refresh, [overwrite: false])
+
+
+}
+
+
+def parseData(responseBody, data){
+	def slurper = new groovy.json.JsonSlurper()
+	def result = slurper.parseText(responseBody.data)
+
+	def todayOut = [:]
+	def tomorrowOut = [:]
+	def today = []
+	def tomorrow = []
+	def avgToday = 0
+	def avgTomorrow = 0
+	def spread = 0
+	def tomorrowSpread = 0
+	def total = 0
+	def tomorrowTotal = 0
+	def currentTime = new Date()
+
+	if(currentTime.after(testTime(23,55,0))){
+		result.data.viewer.homes[0].currentSubscription.priceInfo.tomorrow.each { post->
+		todayOut.put(post.startsAt.substring(11, 16), Math.round(post.energy * 100))
+		today.add(post.energy)
+		total+= post.energy
+	}
+	}
+	else{
+	result.data.viewer.homes[0].currentSubscription.priceInfo.today.each { post->
+		todayOut.put(post.startsAt.substring(11, 16), Math.round(post.energy * 100))
+		today.add(post.energy)
+		total+= post.energy
+	}
+	}
+	
+	today = today.sort()
+	
+	def todayMin = today.get(0)
+	def todayMax = today.get(today.size() - 1)
+	spread = (todayMax - todayMin) * (factor / 100)
+	def lowPrice = Math.round((todayMin + spread) * 100)
+	def highPrice = Math.round((todayMax - spread) * 100)
+	
+	avgToday = Math.round((total / today.size()) * 100)
+
+	sendEvent(name: "avgToday", value: avgToday)
+	sendEvent(name: "lowPrice", value: lowPrice)
+	sendEvent(name: "highPrice", value: highPrice)
+	sendEvent(name: "today", value: todayOut)
+	sendEvent(name: "currentPrice", value: Math.round(result.data.viewer.homes[0].currentSubscription.priceInfo.current.energy * 100))
+	runIn(3, updateChildDevices)		
+}
+
+def updateChildDevices(){
+	def childs = getChildDevices()
+	def currentPrice = device.currentValue("currentPrice")
+	
+	if(currentPrice <= device.currentValue("lowPrice")){
+		childs[0].on()
+		childs[1].off()
+		logInfo("Current price is low")
+		} 
+	else if(currentPrice > device.currentValue("highPrice")){
+		childs[0].off()
+		childs[1].on()
+		logInfo("Current price is high")
+		}
+	if(currentPrice <= device.currentValue("avgToday")){
+		childs[2].on()
+		childs[3].off()
+		logInfo("Current price is below average price")
+	} else {
+		childs[2].off()
+		childs[3].on()
+		logInfo("Current price is above average price")
+	}
+}
+
+def refresh(){
+	logInfo("Fetching price data from Tibber API")
+	    def postParams = [
+            uri: "https://api.tibber.com/v1-beta/gql",
+	    contentType: "application/json",
+	    requestContentType: "application/json",
+            headers: [ "Authorization": "Bearer $securityToken"],
+            body: graphQLApiQuery()
+        ]
+        
+        
+        asynchttpPost('parseData', postParams)
+	
+}
+
+def graphQLApiQuery(){ 
+    return '{"query": "{viewer {homes {currentSubscription{priceInfo(resolution: QUARTER_HOURLY) { current {energy} today{energy startsAt} tomorrow{energy level}}}}}}", "variables": null, "operationName": null}';
+}
+
+def testTime(h,m,s){
+	def time = new Date()
+	time.setHours(h)
+	time.setMinutes(m)
+	time.setSeconds(s)
+return time	
+}
+
+
+
+def addZero(x){	
+	def out = ""
+	if(x < 10){
+		out += "0"+x
+	}
+	else{
+		out += h
+	}
+return out
+}
