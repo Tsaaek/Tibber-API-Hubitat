@@ -1,5 +1,4 @@
 # Tibber-API-Hubitat
 
-Driver Tibber quater prices.
-
+Driver for Tibber API quater prices.
 
