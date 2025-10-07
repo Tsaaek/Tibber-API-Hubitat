@@ -50,7 +50,7 @@ metadata {
 	command "setFixedLowPrice", ["Number"]
 	command "setFixedHighPrice", ["Number"]
 	command "setPriceFactor", ["Number"]
-	command "callAPI"
+	
 
 	   
     }
@@ -67,10 +67,6 @@ preferences {
 
 }
 
-def clearStateVariables(){
-    device.deleteCurrentState('PriceListToday')
-    state.clear()
-}
 
 def logsOff() {
     log.warn "debug logging disabled..."
@@ -140,13 +136,14 @@ def startSchedule(){
 	schedule("00 15 * ? * *",poll, [overwrite: false]) 
 	schedule("00 30 * ? * *",poll, [overwrite: false])
 	schedule("00 45 * ? * *",poll, [overwrite: false]) 
-	schedule("00 57 23 ? * *",callAPI, [overwrite: false])
+	schedule("00 57 23 ? * *",refresh, [overwrite: false])
 
 
 }
 
 
 def parseData(responseBody, data){
+	try{
 	def slurper = new groovy.json.JsonSlurper()
 	def result = slurper.parseText(responseBody.data)
 	def factor = device.currentValue("priceFactor")
@@ -182,10 +179,22 @@ def parseData(responseBody, data){
 
 	
 	avgToday = Math.round((total / today.size()) * 100)
+	state.retries = 0
 	sendEvent(name: "avgToday", value: avgToday)
 	sendEvent(name: "today", value: todayOut)
 	sendEvent(name: "currentPrice", value: Math.round(result.data.viewer.homes[0].currentSubscription.priceInfo.current.energy * 100))
-	runIn(2,refresh)
+	runIn(2,calculate)
+	}
+	catch(e){
+	log.error e
+	if(state.retries == 5){
+	log.error "API call failed. Hit 'refresh' to try again"
+	} else {
+	log.error "API call failed. Trying again in 10 seconds"
+	runIn(10, callAPI)	
+	}
+	
+	}
 }
 
 def updateChildDevices(){
@@ -213,8 +222,19 @@ def updateChildDevices(){
 	}
 }
 
+def refresh(){
+	state.retries = 0
+	callAPI()
+}
+
 def callAPI(){
-	logInfo("Fetching price data from Tibber API")
+	state.retries = state.retries + 1
+	if(state.retries <= 5){
+		if(state.retries > 1){
+			log.info "Fetching price data from Tibber API. Retry number " + state.retries + " of 5."
+		} else {
+		logInfo("Fetching price data from Tibber API")
+		}
 	    def postParams = [
             uri: "https://api.tibber.com/v1-beta/gql",
 	    contentType: "application/json",
@@ -223,12 +243,13 @@ def callAPI(){
             body: graphQLApiQuery()
         ]
         
-        
+
         asynchttpPost('parseData', postParams)
+		}
 	
 }
 
-def refresh(){
+def calculate(){
 	def factor = device.currentValue("priceFactor")
 	
 	def today = state.today
@@ -281,16 +302,17 @@ return out
 
 def setFixedLowPrice(x){
 	sendEvent(name: "fixedLowPrice", value: x)
-	runIn(1,refresh)
+	runIn(1,calculate)
 }
 
 def setFixedHighPrice(x){
 	sendEvent(name: "fixedHighPrice", value: x)	
-	runIn(1,refresh)
+	runIn(1,calculate)
 }
 
 
 def setPriceFactor(x){
 	sendEvent(name: "priceFactor", value: x)	
-	runIn(1,refresh)
+	runIn(1,calculate)
 }
+
