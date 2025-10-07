@@ -31,8 +31,7 @@ import groovy.time.TimeCategory
 metadata {
     definition(name: "Tibber quater-hour prices", namespace: "tsaaek", author: "Tommy Saaek", importUrl: "") {
 	capability "Sensor"
-        capability "Initialize"
-	capability "Polling"
+	capability "Initialize"
 	capability "Refresh"
 	capability "Actuator"
 	
