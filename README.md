@@ -2,7 +2,7 @@
 
 Driver for Tibber API quater prices.
 
-The driver fetches price info from Tibber API once an hour (refresh command), calculates day average price, low/high price and stores the data.
+The driver fetches price info from Tibber API once a day (refresh command), calculates day average price, low/high price and stores the data.
 Every quater it updates the current price from the stored data and sets the child devices according to the current price.
 
 Low/high prices.
