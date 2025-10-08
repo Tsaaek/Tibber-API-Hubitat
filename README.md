@@ -1,23 +1,66 @@
 # Tibber-API-Hubitat
 
-Driver for Tibber API quater prices.
+Driver for controlling devices based on the current quarter-hour electricity price from the Tibber API
+By default, the driver fetches price data from the Tibber API once a day (via the refresh command), calculates the day’s average price and low/high thresholds, and stores the data in the device. You can manually trigger this update at any time using the refresh command.
+At the start of every quarter-hour, the driver retrieves the current price from the stored data and updates the child devices according to the price and calculated thresholds.
 
-The driver fetches price info from Tibber API once a day (refresh command), calculates day average price, low/high price and stores the data.
-Every quater it updates the current price from the stored data and sets the child devices according to the current price.
+Getting the code
 
-Low/high prices.
-The spread between the highest and lowest price of the day is calculated and is then multiplied with the factor set in the settings. The result is added to the lowest price and is used as a threshold for low prices. (For high prices it is subtracted from the highest price.)
-Example:
-Factor is set to 10%
-Highest price is 120
-Lowest price is 20
-The spread is 120-20 = 100 * 10% = 10
+Copy the code.
+Log in to Hubitat and create a new driver (Drivers Code → New Driver).
+Paste the code and click Save.
 
-Low price threshold = 20 + 10 = 30. Every hour with a price equal to or lower to 30 will be concidered as low price-hour. Stored in attribute lowPrice.
-High price threshold = 120 - 10 = 110. Every hour with a price equal to or higher than 110 will be concidered as high price-hour. Stored in attribute highPrice.
 
-The device has four child devices:
-- Tibber_lowPrice - turns on when price is equal to or lower than lowPrice.
-- Tibber_highPrice - turns on when price is equal to or higher than highPrice.
-- Tibber_belowAvg - turns on when price is lower than or equal to day average price. (todayAvg)
-- Tibber_aboveAvg - turns on when price is higher than day average price.
+Creating the device
+
+Create a new virtual device (Devices → Add Device → Virtual Device).
+Select Tibber quarter-hour prices.
+Name the device (e.g., "Tibber").
+Assign a room (optional).
+View the device details.
+
+
+Setting up the device
+
+Go to Preferences.
+Get your Access Token from Tibber Developer Settings and copy it.
+Paste the token into the Tibber API-token field and press Save.
+Return to Commands and press Refresh.
+
+The device is now operational.
+
+Child Devices
+The driver creates four child devices that update based on the current price level:
+Tibber_lowPrice - Activates when price ≤ lowPrice or ≤ fixedLowPrice.
+Tibber_highPrice - Activates when price ≥ highPrice or ≥ fixedHighPrice.
+Tibber_belowAvg - Activates when price ≤ today’s average (todayAvg).
+Tibber_aboveAvg - Activates when price > today’s average.
+
+Price Threshold Calculations
+The driver dynamically calculates low/high thresholds using the day’s min/max prices and a factor (default: 10%). You can override these with fixed values.
+
+Dynamic Thresholds
+lowPrice:
+Lowest price + ((Highest price – Lowest price) × Factor)
+Example: 20 öre + ((120 öre – 20 öre) × 0.1) = 30 öre.
+→ Any quarter-hour ≤ 30 öre is considered a low price.
+
+
+highPrice:
+Highest price – ((Highest price – Lowest price) × Factor)
+Example: 120 öre – ((120 öre – 20 öre) × 0.1) = 110 öre.
+→ Any quarter-hour ≥ 110 öre is considered a high price.
+
+
+Fixed Thresholds (User-Defined)
+
+fixedLowPrice: Always treated as a low price (regardless of dynamic calculation).
+fixedHighPrice: Always treated as a high price.
+
+
+Notes
+
+You can adjust the factor, fixedLowPrice, or fixedHighPrice at any time.
+After changes, the driver recalculates thresholds and updates values automatically.
+
+
