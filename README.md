@@ -55,6 +55,7 @@ Example: 120 öre – ((120 öre – 20 öre) × 0.1) = 110 öre.
 Fixed Thresholds (User-Defined)
 
 fixedLowPrice: Always treated as a low price (regardless of dynamic calculation).
+
 fixedHighPrice: Always treated as a high price.
 
 
